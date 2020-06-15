@@ -12,24 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package main runs all the server components at different URL paths.
-package main
+package verification
 
-import (
-	"context"
+import "time"
 
-	"github.com/google/exposure-notifications-server/internal/logging"
-	"github.com/google/exposure-notifications-server/internal/monolith"
-
-	// Enable observability with distributed tracing and metrics.
-	_ "github.com/google/exposure-notifications-server/internal/observability"
-)
-
-func main() {
-	ctx := context.Background()
-	logger := logging.FromContext(ctx)
-
-	if _, err := monolith.RunServer(ctx); err != nil {
-		logger.Fatal(err)
-	}
+// Config represents the available configuration for the public health authority
+// verification piece.
+type Config struct {
+	CacheDuration time.Duration `env:"VERIFICATION_CACHE_DURATION, default=5m"`
 }

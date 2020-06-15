@@ -106,7 +106,13 @@ func main() {
 			log.Fatalf("unable to parse json: %v", err)
 		}
 		for _, k := range data.Keys {
-			ek, err := publishmodel.TransformExposureKey(k, "", []string{}, time.Now(), int32(0), int32(time.Now().Unix()/600))
+			settings := publishmodel.KeyTransform{
+				MinStartInterval:      0,
+				MaxStartInterval:      int32(time.Now().Unix() / 600),
+				CreatedAt:             time.Now(),
+				ReleaseStillValidKeys: false,
+			}
+			ek, err := publishmodel.TransformExposureKey(k, "", []string{}, &settings)
 			if err != nil {
 				log.Fatalf("invalid exposure key: %v", err)
 			}
@@ -154,30 +160,55 @@ func main() {
 		currentBatch = append(currentBatch, &exposureKeys[i])
 		if len(currentBatch) == *batchSize {
 			b++
-			writeFile(eb, currentBatch, b, numBatches, actualNumKeys, privateKey)
+			w := exportFileWriter{
+				exportBatch: eb,
+				exposures:   currentBatch,
+				curBatch:    b,
+				numBatches:  numBatches,
+				totalKeys:   actualNumKeys,
+				privateKey:  privateKey,
+			}
+			w.writeFile()
 			currentBatch = []*publishmodel.Exposure{}
 		}
 	}
 	if len(currentBatch) > 0 {
 		b++
-		writeFile(eb, currentBatch, b, numBatches, actualNumKeys, privateKey)
+		w := exportFileWriter{
+			exportBatch: eb,
+			exposures:   currentBatch,
+			curBatch:    b,
+			numBatches:  numBatches,
+			totalKeys:   actualNumKeys,
+			privateKey:  privateKey,
+		}
+		w.writeFile()
 	}
 }
 
-func writeFile(eb *model.ExportBatch, currentBatch []*publishmodel.Exposure, b, numBatches, numRecords int, privateKey *ecdsa.PrivateKey) {
+type exportFileWriter struct {
+	exportBatch *model.ExportBatch
+	exposures   []*publishmodel.Exposure
+	curBatch    int
+	numBatches  int
+	totalKeys   int
+	privateKey  *ecdsa.PrivateKey
+}
+
+func (e *exportFileWriter) writeFile() {
 	signatureInfo := &model.SignatureInfo{
 		SigningKeyID:      *keyID,
 		SigningKeyVersion: *keyVersion,
 	}
 	signer := &export.Signer{
 		SignatureInfo: signatureInfo,
-		Signer:        privateKey,
+		Signer:        e.privateKey,
 	}
-	data, err := export.MarshalExportFile(eb, currentBatch, b, numBatches, []*export.Signer{signer})
+	data, err := export.MarshalExportFile(e.exportBatch, e.exposures, e.curBatch, e.numBatches, []*export.Signer{signer})
 	if err != nil {
-		log.Fatalf("error marshalling export file: %v", err)
+		log.Fatalf("error marshaling export file: %v", err)
 	}
-	fileName := fmt.Sprintf(eb.FilenameRoot+"%d-records-%d-of-%d"+filenameSuffix, numRecords, b, numBatches)
+	fileName := fmt.Sprintf(e.exportBatch.FilenameRoot+"%d-records-%d-of-%d"+filenameSuffix, e.totalKeys, e.curBatch, e.numBatches)
 	log.Printf("Creating %v", fileName)
 	err = ioutil.WriteFile(fileName, data, 0666)
 	if err != nil {
@@ -190,7 +221,8 @@ func getSigningKey(fileName string) (*ecdsa.PrivateKey, error) {
 	return ParseECPrivateKeyFromPEM(keyBytes)
 }
 
-// Parse PEM encoded Elliptic Curve Private Key Structure.
+// ParseECPrivateKeyFromPEM parses PEM encoded Elliptic Curve Private Key
+// structure.
 func ParseECPrivateKeyFromPEM(key []byte) (*ecdsa.PrivateKey, error) {
 	ErrNotECPrivateKey := errors.New("key is not a valid ECDSA private key")
 	ErrKeyMustBePEMEncoded := errors.New("invalid Key: Key must be PEM encoded PKCS1 or PKCS8 private key")

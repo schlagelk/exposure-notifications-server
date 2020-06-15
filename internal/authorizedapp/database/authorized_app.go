@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package database is a database interface to authorized apps.
 package database
 
 import (
@@ -108,7 +109,7 @@ func (aa *AuthorizedAppDB) DeleteAuthorizedApp(ctx context.Context, name string)
 	return nil
 }
 
-func (aa *AuthorizedAppDB) GetAllAuthorizedApps(ctx context.Context, sm secrets.SecretManager) ([]*model.AuthorizedApp, error) {
+func (aa *AuthorizedAppDB) ListAuthorizedApps(ctx context.Context) ([]*model.AuthorizedApp, error) {
 	conn, err := aa.db.Pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquiring connection: %w", err)
@@ -121,7 +122,7 @@ func (aa *AuthorizedAppDB) GetAllAuthorizedApps(ctx context.Context, sm secrets.
 			allowed_health_authority_ids, bypass_health_authority_verification
 		FROM
 			AuthorizedApp
-		ORDER BY app_package_name ASC`
+		ORDER BY LOWER(app_package_name) ASC`
 
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
@@ -135,7 +136,7 @@ func (aa *AuthorizedAppDB) GetAllAuthorizedApps(ctx context.Context, sm secrets.
 			return nil, fmt.Errorf("iterating rows: %w", err)
 		}
 
-		app, err := scanOneAuthorizedApp(ctx, rows, sm)
+		app, err := scanOneAuthorizedApp(ctx, rows)
 		if err != nil {
 			return nil, fmt.Errorf("error reading authorized apps: %w", err)
 		}
@@ -163,10 +164,10 @@ func (aa *AuthorizedAppDB) GetAuthorizedApp(ctx context.Context, sm secrets.Secr
 
 	row := conn.QueryRow(ctx, query, name)
 
-	return scanOneAuthorizedApp(ctx, row, sm)
+	return scanOneAuthorizedApp(ctx, row)
 }
 
-func scanOneAuthorizedApp(ctx context.Context, row pgx.Row, sm secrets.SecretManager) (*model.AuthorizedApp, error) {
+func scanOneAuthorizedApp(ctx context.Context, row pgx.Row) (*model.AuthorizedApp, error) {
 	config := model.NewAuthorizedApp()
 	var allowedRegions []string
 	var allowedHealthAuthorityIDs []int64

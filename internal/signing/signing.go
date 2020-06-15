@@ -21,21 +21,6 @@ import (
 	"fmt"
 )
 
-// KeyManagerType defines a specific key manager.
-type KeyManagerType string
-
-const (
-	KeyManagerTypeAWSKMS         KeyManagerType = "AWS_KMS"
-	KeyManagerTypeGoogleCloudKMS KeyManagerType = "GOOGLE_CLOUD_KMS"
-	KeyManagerTypeHashiCorpVault KeyManagerType = "HASHICORP_VAULT"
-	KeyManagerTypeNoop           KeyManagerType = "NOOP"
-)
-
-// Config defines configuration.
-type Config struct {
-	KeyManagerType KeyManagerType `envconfig:"KEY_MANAGER" default:"GOOGLE_CLOUD_KMS"`
-}
-
 // KeyManager defines the interface for working with a KMS system that
 // is able to sign bytes using PKI.
 // KeyManager implementations must be able to return a crypto.Signer.
@@ -48,6 +33,8 @@ func KeyManagerFor(ctx context.Context, typ KeyManagerType) (KeyManager, error) 
 	switch typ {
 	case KeyManagerTypeAWSKMS:
 		return NewAWSKMS(ctx)
+	case KeyManagerTypeAzureKeyVault:
+		return NewAzureKeyVault(ctx)
 	case KeyManagerTypeGoogleCloudKMS:
 		return NewGoogleCloudKMS(ctx)
 	case KeyManagerTypeHashiCorpVault:

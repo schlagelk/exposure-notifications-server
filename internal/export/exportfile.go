@@ -89,7 +89,7 @@ func MarshalExportFile(eb *model.ExportBatch, exposures []*publishmodel.Exposure
 	return buf.Bytes(), nil
 }
 
-// Unmarshal extracts the protobuf encoded exposure key present in the zip archived payload.
+// UnmarshalExportFile extracts the protobuf encoded exposure key present in the zip archived payload.
 func UnmarshalExportFile(zippedProtoPayload []byte) (*export.TemporaryExposureKeyExport, error) {
 	zp, err := zip.NewReader(bytes.NewReader(zippedProtoPayload), int64(len(zippedProtoPayload)))
 	if err != nil {
@@ -180,12 +180,6 @@ func marshalContents(eb *model.ExportBatch, exposures []*publishmodel.Exposure, 
 
 func createSignatureInfo(si *model.SignatureInfo) *export.SignatureInfo {
 	sigInfo := &export.SignatureInfo{SignatureAlgorithm: proto.String(algorithm)}
-	if si.AppPackageName != "" {
-		sigInfo.AndroidPackage = proto.String(si.AppPackageName)
-	}
-	if si.BundleID != "" {
-		sigInfo.AppBundleId = proto.String(si.BundleID)
-	}
 	if si.SigningKeyVersion != "" {
 		sigInfo.VerificationKeyVersion = proto.String(si.SigningKeyVersion)
 	}

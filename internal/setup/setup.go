@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package setup provides common logic for configuring the various services.
 package setup
 
 import (
@@ -20,15 +21,13 @@ import (
 
 	"github.com/google/exposure-notifications-server/internal/authorizedapp"
 	"github.com/google/exposure-notifications-server/internal/database"
-	"github.com/google/exposure-notifications-server/internal/envconfig"
 	"github.com/google/exposure-notifications-server/internal/logging"
 	"github.com/google/exposure-notifications-server/internal/metrics"
 	"github.com/google/exposure-notifications-server/internal/secrets"
 	"github.com/google/exposure-notifications-server/internal/serverenv"
 	"github.com/google/exposure-notifications-server/internal/signing"
 	"github.com/google/exposure-notifications-server/internal/storage"
-
-	kenvconfig "github.com/kelseyhightower/envconfig"
+	"github.com/sethvargo/go-envconfig/pkg/envconfig"
 )
 
 // BlobstoreConfigProvider provides the information about current storage
@@ -61,17 +60,34 @@ type SecretManagerConfigProvider interface {
 	SecretManagerConfig() *secrets.Config
 }
 
-// Function returned from setup to be deferred until the caller exits.
-type Defer func()
+// Setup runs common initialization code for all servers. See SetupWith.
+func Setup(ctx context.Context, config interface{}) (*serverenv.ServerEnv, error) {
+	return SetupWith(ctx, config, envconfig.OsLookuper())
+}
 
-// Setup runs common initialization code for all servers.
-func Setup(ctx context.Context, config DatabaseConfigProvider) (*serverenv.ServerEnv, Defer, error) {
+// SetupWith processes the given configuration using envconfig. It is
+// responsible for establishing database connections, resolving secrets, and
+// accessing app configs. The provided interface must implement the various
+// interfaces.
+func SetupWith(ctx context.Context, config interface{}, l envconfig.Lookuper) (*serverenv.ServerEnv, error) {
 	logger := logging.FromContext(ctx)
+
+	// Build a list of mutators. This list will grow as we initialize more of the
+	// configuration, such as the secret manager.
+	var mutatorFuncs []envconfig.MutatorFunc
+
+	// Build a list of options to pass to the server env.
+	var serverEnvOpts []serverenv.Option
+
+	// TODO: support customizable metrics
+	serverEnvOpts = append(serverEnvOpts, serverenv.WithMetricsExporter(metrics.NewLogsBasedFromContext))
 
 	// Load the secret manager - this needs to be loaded first because other
 	// processors may require access to secrets.
 	var sm secrets.SecretManager
 	if provider, ok := config.(SecretManagerConfigProvider); ok {
+		logger.Info("configuring secret manager")
+
 		// The environment configuration defines which secret manager to use, so we
 		// need to process the envconfig in here. Once we know which secret manager
 		// to use, we can load the secret manager and then re-process (later) any
@@ -81,79 +97,111 @@ func Setup(ctx context.Context, config DatabaseConfigProvider) (*serverenv.Serve
 		// secret:// reference. This configuration option must always be the
 		// plaintext string.
 		smConfig := provider.SecretManagerConfig()
-		if err := kenvconfig.Process("", smConfig); err != nil {
-			return nil, nil, fmt.Errorf("unable to process secret manager environment: %w", err)
+		if err := envconfig.ProcessWith(ctx, smConfig, l, mutatorFuncs...); err != nil {
+			return nil, fmt.Errorf("unable to process secret manager env: %w", err)
 		}
 
 		var err error
 		sm, err = secrets.SecretManagerFor(ctx, smConfig.SecretManagerType)
 		if err != nil {
-			return nil, nil, fmt.Errorf("unable to connect to secret manager: %w", err)
+			return nil, fmt.Errorf("unable to connect to secret manager: %w", err)
 		}
 
-		// Enable caching, if provided.
+		// Enable caching, if a TTL was provided.
 		if ttl := smConfig.SecretCacheTTL; ttl > 0 {
-			sm = secrets.WrapCacher(ctx, sm, ttl)
+			sm, err = secrets.WrapCacher(ctx, sm, ttl)
+			if err != nil {
+				return nil, fmt.Errorf("unable to create secret manager cache: %w", err)
+			}
 		}
+
+		// Update the mutators to process secrets.
+		mutatorFuncs = append(mutatorFuncs, secrets.Resolver(sm, smConfig))
+
+		// Update serverEnv setup.
+		serverEnvOpts = append(serverEnvOpts, serverenv.WithSecretManager(sm))
+
+		logger.Infow("secret manager", "config", smConfig)
+	}
+
+	// Load the key manager.
+	var km signing.KeyManager
+	if provider, ok := config.(KeyManagerConfigProvider); ok {
+		logger.Info("configuring key manager")
+
+		kmConfig := provider.KeyManagerConfig()
+		if err := envconfig.ProcessWith(ctx, kmConfig, l, mutatorFuncs...); err != nil {
+			return nil, fmt.Errorf("unable to process key manager env: %w", err)
+		}
+
+		var err error
+		km, err = signing.KeyManagerFor(ctx, kmConfig.KeyManagerType)
+		if err != nil {
+			return nil, fmt.Errorf("unable to connect to key manager: %w", err)
+		}
+
+		// Update serverEnv setup.
+		serverEnvOpts = append(serverEnvOpts, serverenv.WithKeyManager(km))
+
+		logger.Infow("key manager", "config", kmConfig)
 	}
 
 	// Process first round of environment variables.
-	if err := envconfig.Process(ctx, config, sm); err != nil {
-		return nil, nil, fmt.Errorf("error loading environment variables: %w", err)
+	if err := envconfig.ProcessWith(ctx, config, l, mutatorFuncs...); err != nil {
+		return nil, fmt.Errorf("error loading environment variables: %w", err)
 	}
-	logger.Infof("Effective environment variables: %+v", config)
-
-	// Start building serverenv opts
-	opts := []serverenv.Option{
-		serverenv.WithSecretManager(sm),
-		serverenv.WithMetricsExporter(metrics.NewLogsBasedFromContext),
-	}
-
-	// Configure key management for signing.
-	if provider, ok := config.(KeyManagerConfigProvider); ok {
-		kmConfig := provider.KeyManagerConfig()
-		km, err := signing.KeyManagerFor(ctx, kmConfig.KeyManagerType)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unable to connect to key manager: %w", err)
-		}
-		opts = append(opts, serverenv.WithKeyManager(km))
-	}
+	logger.Infow("provided", "config", config)
 
 	// Configure blob storage.
 	if provider, ok := config.(BlobstoreConfigProvider); ok {
+		logger.Info("configuring blobstore")
+
 		bsConfig := provider.BlobstoreConfig()
 		blobStore, err := storage.BlobstoreFor(ctx, bsConfig.BlobstoreType)
 		if err != nil {
-			return nil, nil, fmt.Errorf("unable to connect to storage system: %v", err)
+			return nil, fmt.Errorf("unable to connect to storage system: %v", err)
 		}
 		blobStorage := serverenv.WithBlobStorage(blobStore)
-		opts = append(opts, blobStorage)
+
+		// Update serverEnv setup.
+		serverEnvOpts = append(serverEnvOpts, blobStorage)
+
+		logger.Infow("blobstore", "config", bsConfig)
 	}
 
 	// Setup the database connection.
-	db, err := database.NewFromEnv(ctx, config.DatabaseConfig())
-	if err != nil {
-		return nil, nil, fmt.Errorf("unable to connect to database: %v", err)
-	}
-	{
-		// Log the database config, but omit the password field.
-		redactedDB := config.DatabaseConfig()
-		redactedDB.Password = "<hidden>"
-		logger.Infof("Effective DB config: %+v", redactedDB)
-	}
-	opts = append(opts, serverenv.WithDatabase(db))
+	if provider, ok := config.(DatabaseConfigProvider); ok {
+		logger.Info("configuring database")
 
-	// AuthorizedApp must come after database setup due to the dependency.
-	if typ, ok := config.(AuthorizedAppConfigProvider); ok {
-		logger.Infof("Effective AuthorizedApp config: %+v", typ.AuthorizedAppConfig())
-		provider, err := authorizedapp.NewDatabaseProvider(ctx, db, typ.AuthorizedAppConfig(), authorizedapp.WithSecretManager(sm))
+		dbConfig := provider.DatabaseConfig()
+		db, err := database.NewFromEnv(ctx, dbConfig)
 		if err != nil {
-			// Ensure the database is closed on an error.
-			defer db.Close(ctx)
-			return nil, nil, fmt.Errorf("unable to create AuthorizedApp provider: %v", err)
+			return nil, fmt.Errorf("unable to connect to database: %v", err)
 		}
-		opts = append(opts, serverenv.WithAuthorizedAppProvider(provider))
+
+		// Update serverEnv setup.
+		serverEnvOpts = append(serverEnvOpts, serverenv.WithDatabase(db))
+
+		logger.Infow("database", "config", dbConfig)
+
+		// AuthorizedApp must come after database setup due to the dependency.
+		if provider, ok := config.(AuthorizedAppConfigProvider); ok {
+			logger.Info("configuring authorizedapp")
+
+			aaConfig := provider.AuthorizedAppConfig()
+			aa, err := authorizedapp.NewDatabaseProvider(ctx, db, aaConfig, authorizedapp.WithSecretManager(sm))
+			if err != nil {
+				// Ensure the database is closed on an error.
+				defer db.Close(ctx)
+				return nil, fmt.Errorf("unable to create AuthorizedApp provider: %v", err)
+			}
+
+			// Update serverEnv setup.
+			serverEnvOpts = append(serverEnvOpts, serverenv.WithAuthorizedAppProvider(aa))
+
+			logger.Infow("authorizedapp", "config", aaConfig)
+		}
 	}
 
-	return serverenv.New(ctx, opts...), func() { db.Close(ctx) }, nil
+	return serverenv.New(ctx, serverEnvOpts...), nil
 }

@@ -1,3 +1,6 @@
+---
+layout: default
+---
 # Exposure Notification Reference Server
 
 [COVID‑19 Exposure Notifications API](https://www.google.com/covid19/exposurenotifications/)
@@ -23,7 +26,7 @@ The Exposure Notification Server is responsible for the following functions:
 * Accepting the temporary exposure keys of affected users from mobile devices.
 
 * Validating the temporary exposure keys using a [configurable third-party
-  verification service](docs/design/verification_protocol.md).
+  verification service](design/verification_protocol.md).
 
 * Storing the temporary exposure keys in a database.
 
@@ -40,11 +43,12 @@ The Exposure Notification Server is responsible for the following functions:
 You can read tutorials on deploying and using the reference Exposure Notification
 Server here:
 
-* [Deployment guide](deploying.md)
+* [Deployment guide](getting-started/deploying.md)
 * [Contributor guide](https://github.com/google/exposure-notifications-server/blob/master/CONTRIBUTING.md)
 * [Server Functional Requirements](server_functional_requirements.md)
 * [Server Deployment Options](server_deployment_options.md)
 * [Reference documentation](https://pkg.go.dev/mod/github.com/google/exposure-notifications-server)
+* [API Definitions](https://github.com/google/exposure-notifications-server/tree/master/pkg/api/v1alpha1)
 
 ## Issues and Questions
 

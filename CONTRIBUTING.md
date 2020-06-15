@@ -69,7 +69,7 @@ Docker is installed and available in your `$PATH`.
     $ eval $(./scripts/dev init)
     ```
 
-    **If you close your terminal tab or session, you will need to re-run this
+    **If you close your terminal tab or session, you need to re-run this
     command.**
 
 1.  Create the local development database:
@@ -98,13 +98,6 @@ Docker is installed and available in your `$PATH`.
 
     ```text
     $ go run ./cmd/exposure/...
-    ```
-
-    Alternatively, you can run all the server components as a single binary with
-    each component at a different path:
-
-    ```text
-    $ go run ./cmd/monolith/...
     ```
 
 1.  When you're done developing, you can stop the database.

@@ -20,29 +20,18 @@ import (
 	"fmt"
 )
 
-// BlobstoreType defines a specific blobstore.
-type BlobstoreType string
-
-const (
-	BlobstoreTypeAWSS3              BlobstoreType = "AWS_S3"
-	BlobstoreTypeAzureBlobStorage   BlobstoreType = "AZURE_BLOB_STORAGE"
-	BlobstoreTypeGoogleCloudStorage BlobstoreType = "GOOGLE_CLOUD_STORAGE"
-	BlobstoreTypeFilesystem         BlobstoreType = "FILESYSTEM"
-	BlobstoreTypeNoop               BlobstoreType = "NOOP"
-)
-
-// Config defines the configuration for a blobstore.
-type Config struct {
-	BlobstoreType BlobstoreType `envconfig:"BLOBSTORE" default:"GOOGLE_CLOUD_STORAGE"`
-}
+var ErrNotFound = fmt.Errorf("storage object not found")
 
 // Blobstore defines the minimum interface for a blob storage system.
 type Blobstore interface {
 	// CreateObject creates or overwrites an object in the storage system.
-	CreateObject(ctx context.Context, bucket, objectName string, contents []byte, cacheable bool) error
+	CreateObject(ctx context.Context, parent, name string, contents []byte, cacheable bool) error
 
-	// DeleteObject deltes an object or does nothing if the object doesn't exist.
-	DeleteObject(ctx context.Context, bucket, objectName string) error
+	// DeleteObject deletes an object or does nothing if the object doesn't exist.
+	DeleteObject(ctx context.Context, parent, bame string) error
+
+	// GetObject fetches the object's contents.
+	GetObject(ctx context.Context, parent, name string) ([]byte, error)
 }
 
 // BlobstoreFor returns the blob store for the given type, or an error if one
@@ -57,6 +46,8 @@ func BlobstoreFor(ctx context.Context, typ BlobstoreType) (Blobstore, error) {
 		return NewGoogleCloudStorage(ctx)
 	case BlobstoreTypeFilesystem:
 		return NewFilesystemStorage(ctx)
+	case BlobstoreTypeMemory:
+		return NewMemory(ctx)
 	case BlobstoreTypeNoop:
 		return NewNoop(ctx)
 	default:

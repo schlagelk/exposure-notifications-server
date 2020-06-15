@@ -35,6 +35,7 @@ resource "google_project_service" "services" {
   for_each = toset([
     "cloudbuild.googleapis.com",
     "cloudkms.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
     "cloudscheduler.googleapis.com",
     "compute.googleapis.com",
     "containerregistry.googleapis.com",
@@ -168,6 +169,14 @@ resource "google_app_engine_application" "app" {
   location_id = var.appengine_location
 }
 
+output "project_id" {
+  value = data.google_project.project.project_id
+}
+
+output "project_number" {
+  value = data.google_project.project.number
+}
+
 output "region" {
   value = var.region
 }
@@ -198,8 +207,4 @@ output "cloudrun_location" {
 
 output "storage_location" {
   value = var.storage_location
-}
-
-output "project" {
-  value = data.google_project.project.project_id
 }

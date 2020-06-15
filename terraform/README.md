@@ -21,7 +21,7 @@ continuous deployment.
 
 ## Instructions
 
-For full instructions on deploying, view the [deployment docs](../docs/deploying.md)
+For full instructions on deploying, view the [deployment docs](../docs/getting-started/deploying.md)
 
 1.  Create a GCP project.
     [Instructions](https://cloud.google.com/resource-manager/docs/creating-managing-projects).
@@ -58,7 +58,7 @@ For full instructions on deploying, view the [deployment docs](../docs/deploying
     system.
 
     ```text
-    $ echo "create_generate_service = true" >> ./terraform.tfvars
+    $ echo 'generate_cron_schedule = "*/15 * * * *"' >> ./terraform.tfvars
     ```
 
 1.  (Optional, but recommended) Create a Cloud Storage bucket for storing remote

@@ -1,3 +1,7 @@
+---
+layout: default
+classes: wide
+---
 # Google Exposure Notification Server
 
 ## Functional requirements
@@ -15,8 +19,8 @@ The following diagram shows the relationship between the different components:
 The server components are responsible for the following functions:
 
 * Accepting the temporary exposure keys of positively diagnosed users from
-mobile devices, validating those keys via device attestation APIs, and
-storing those keys in a database.
+mobile devices, validating those keys via configured public health authority
+_diagnosis verification servers_.
 
 * Periodically generating incremental files for download by client
 devices for performing the key matching algorithm that is run on the mobile
@@ -34,11 +38,19 @@ device download content.
 
 * Recommended: Periodically deleting old temporary exposure keys. After 14
 days (or configured time period) the keys can no longer be matched to devices.
+_Please seek legal counsel about data retention policies in your locale._
 
 * Recommended: Using a CDN to distribute the temporary exposure keys of affected
 users to mobile devices.
 
 ### Publishing temporary exposure keys
+
+Before reporting temporary exposure keys to the exposure notifications server,
+a diagnosis must first verified by a _diagnosis verification server_. The
+diagnosis verification server is intentionally separate from the exposure
+notifications server. The verification server is run by a local government or
+public health authority. The exposure notifications server is responsible for
+[validating these certificates](design/verification_protocol.md).
 
 When a user reports a diagnosis, it is reported using the publish API server.
 In the reference server implementation, the data is encoded in JSON and sent
@@ -49,6 +61,8 @@ A given mobile application and server pair could agree upon additional
 information to be shared. The information described in this section is the
 minimum required set in order to validate the uploads and to generate the
 necessary client batches for ingestion into the device for key matching.
+
+We have provides a sample API in [exposure_types.go](https://github.com/google/exposure-notifications-server/blob/master/pkg/api/v1alpha1/exposure_types.go).
 
 Minimum required fields, followed by a JSON example:
 
@@ -84,18 +98,18 @@ Minimum required fields, followed by a JSON example:
   * Type: string (lowercase)
   * Description: Name of the application being used to send the request. This
     is used to determine what app is uploading keys and if it is an allowed
-    region for that app.
-* `platform` (**DEPRECATED**)
-  * Type: string
-  * Description: Mobile device platform this request originated from.
-* `deviceVerificationPayload` (**DEPRECATED**)
-  * Type: String
-  * Description:  Device attestation. This field is deprecated in favor of
-    `verificationPayload`, which comes from a verification authority.
-* `verificationPayload`
+    region for that app. (BundleID on iOS)
+* `verificationPayload` (**REQUIRED FOR VERIFICATION PROTOCOL**)
   * Type: String
   * Description: verificationPayload is a signed certificate from a public
     health authority, indicating a confirmed diagnosis
+* `hmackey` (**REQUIRED FOR VERIFICATION PROTOCOL**)
+  * Type: String
+  * Description: The device generated, random key that was used to create the
+  HMAC for the data sent to the diagnosis verification server. The actual
+  data to calculate the HMAC over is defined as part of the
+  [verification protocol](design/verification_protocol.md). This field is base64
+  encoded.
 * `padding`
   * Type: String
   * Constraints:
@@ -113,25 +127,18 @@ The following snippet is an example POST request payload in JSON format.
     {"key": "base64 KEYN", "rollingStartNumber": 12499, "rollingPeriod": 100, "transmissionRisk": 7}],
   "regions": ["US", "CA", "MX"],
   "appPackageName": "com.foo.app",
-  "verificationPayload": "signature /code from  of verifying authority",
+  "verificationPayload": "signed JWT issued by public health authority",
+  "hmackey": "base64 encoded HMAC key used in preparing the data for the verification server",
   "padding": "random string data..."
 }
 ```
 
 ### Requirements and recommendations
 
-* Required: A whitelist check for `appPackageName` and the regions in
-which the app is allowed to report on.
-
-* Recommended: The `transaction_id` in the payload should be the SHA 256 hash of
-the concatenation of:
-
-  * `appPackageName`
-
-  * Concatenation of the `TrackingKey.Key` values in their base64 encoding,
-  sorted lexicographically
-
-  * Concatenation of regions, uppercased, sorted lexicographically
+* Required: An allow-list check for `appPackageName` and the regions in
+which the app is allowed to report on. Individual applications should also be
+configured for one or more public health authorities they at they accept
+diagnosis verifications from.
 
 * Recommended: To discourage abuse, only failures in processing should
 return retry-able error codes to clients. For example, invalid device
@@ -143,18 +150,20 @@ analysis.
 * Recommended: Our overall security and privacy recommendation is to, from
   the mobile application, periodically send chaff requests to the sever so that
   ALL users appear to be reporting themselves as infected multiple times per
-  day.
+  day. These requests will be rejected if they contain an invalid or unsigned
+  JWT in the `verificationPayload` field.
 
 ### Batch creation and publishing
 
 You should schedule a script that generates files for download over the HTTPS
 protocol to client devices. The generation of these files are a regular and
-frequent operation (at least once a day per device), we recommend that you
+frequent operation (batches should be generated at least once a day), we recommend that you
 generate the files in a single operation rather than on-demand, and distribute
 the files using a CDN.
 
 For information on the format of the batch file, see
-[Exposure Key Export File Format and Verification](https://www.google.com/covid19/exposurenotifications/pdfs/Exposure-Key-File-Format-and-Verification.pdf).
+[Exposure Key Export File Format and Verification](https://developers.google.com/android/exposure-notifications/exposure-key-file-format)
+and [Working with Export Files](https://github.com/google/exposure-notifications-server/tree/master/examples/export).
 
 The batch file generation should be per-region, incremental feeds of new data.
 While additional data can be included in the downloads, there is a minimum set
